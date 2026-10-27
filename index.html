@@ -14,15 +14,15 @@
             padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
         }
         
-        /* 影片與畫布容器：固定 16:9 比例，確保重疊精準 */
+        /* 影片與畫布容器：固定 16:9 比例 */
         .video-container {
             position: relative;
             width: 100%;
             aspect-ratio: 16 / 9;
             background-color: #000;
-            border-radius: 0.75rem;
+            border-radius: 0.75rem 0.75rem 0 0;
             overflow: hidden;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
 
         #localVideo, #ytPlayerContainer {
@@ -45,18 +45,50 @@
             width: 100%;
             height: 100%;
             z-index: 20;
-            touch-action: none; /* 防止觸控繪圖時觸發網頁捲動 */
-            pointer-events: auto; /* 預設允許繪圖，播放時透過 JS 改為 none */
+            touch-action: none;
+            pointer-events: none; /* 預設 none，暫停時改為 auto */
         }
-
-        /* 隱藏捲軸但保留功能 */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #1f2937; }
-        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
 
         .hidden-player {
             display: none !important;
+        }
+
+        /* 自訂滑桿外觀 */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #4b5563;
+            border-radius: 2px;
+        }
+        input[type=range]:focus {
+            outline: none;
+        }
+
+        /* 畫筆工具選取狀態 */
+        .tool-btn.active {
+            background-color: #374151; /* gray-700 */
+            border-color: #60a5fa; /* blue-400 */
+            color: #93c5fd;
+        }
+        .color-btn.active {
+            transform: scale(1.2);
+            box-shadow: 0 0 0 2px #1f2937, 0 0 0 4px #fff;
         }
     </style>
 </head>
@@ -68,19 +100,15 @@
             <h1 class="text-2xl font-bold text-white flex items-center gap-2">
                 ⚽ 戰術分析板 <span class="text-xs bg-blue-600 text-white px-2 py-1 rounded-md font-medium">PRO</span>
             </h1>
-            <p class="text-sm text-gray-400 mt-1">匯入素材、暫停繪製戰術線、記錄關鍵時刻</p>
+            <p class="text-sm text-gray-400 mt-1">匯入素材、自由進度拖曳、專業戰術製圖與標記</p>
         </div>
         
         <div class="flex flex-col sm:flex-row w-full lg:w-auto items-stretch sm:items-center gap-3">
-            <!-- 本機影片上傳 -->
             <label class="cursor-pointer bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 whitespace-nowrap">
                 📁 載入 MP4
                 <input type="file" id="videoUpload" accept="video/mp4,video/x-m4v,video/*" class="hidden">
             </label>
-            
             <div class="text-gray-500 font-medium text-sm text-center hidden sm:block">或</div>
-            
-            <!-- YouTube 匯入 -->
             <div class="flex flex-grow sm:flex-grow-0">
                 <input type="text" id="ytUrlInput" placeholder="貼上 YouTube 連結..." class="bg-gray-800 border border-gray-700 text-white text-sm rounded-l-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 outline-none placeholder-gray-500">
                 <button id="loadYtBtn" class="bg-red-600 hover:bg-red-700 text-white rounded-r-lg px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap">
@@ -90,72 +118,97 @@
         </div>
     </header>
 
-    <!-- 錯誤提示區塊 -->
     <div id="errorMsg" class="max-w-7xl mx-auto w-full mb-4 text-red-400 text-sm font-medium hidden"></div>
 
     <!-- 主要內容區 -->
     <main class="max-w-7xl mx-auto w-full flex-grow grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        <!-- 左側：影片播放與繪圖區 -->
-        <div class="lg:col-span-2 flex flex-col gap-4">
+        <!-- 左側：影片、控制與繪圖工具區 -->
+        <div class="lg:col-span-2 flex flex-col">
             
             <div class="video-container" id="videoWrapper">
-                <!-- 提示疊加層 -->
                 <div id="placeholderUI" class="absolute inset-0 flex flex-col items-center justify-center text-gray-500 z-0">
                     <svg class="w-12 h-12 mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path></svg>
                     <p>請載入本機影片或 YouTube 連結</p>
                 </div>
-
-                <!-- 本機影片播放器 (iOS 重大修正: playsinline webkit-playsinline disablePictureInPicture，且無 controls) -->
                 <video id="localVideo" playsinline webkit-playsinline disablePictureInPicture class="hidden-player"></video>
-                
-                <!-- YouTube 播放器容器 -->
                 <div id="ytPlayerContainer" class="hidden-player"></div>
-
-                <!-- 戰術繪圖畫布 -->
                 <canvas id="drawingCanvas"></canvas>
             </div>
 
-            <!-- 播放器控制列 -->
-            <div class="flex justify-between items-center bg-gray-800 p-4 rounded-xl border border-gray-700">
+            <!-- 時間軸與播放控制 -->
+            <div class="bg-gray-800 p-4 border-x border-b border-gray-700 flex flex-col gap-3">
                 <div class="flex items-center gap-4">
-                    <button id="playPauseBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-medium transition-colors text-sm flex items-center gap-2 shadow-lg shadow-blue-900/20">
-                        ▶️ 播放 / 暫停
+                    <button id="playPauseBtn" class="bg-blue-600 hover:bg-blue-700 text-white p-2.5 rounded-full font-medium transition-colors shadow-lg shadow-blue-900/20 flex-shrink-0 flex items-center justify-center w-10 h-10">
+                        <!-- 預設顯示播放圖示 -->
+                        <svg id="playIcon" class="w-5 h-5 ml-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"></path></svg>
+                        <svg id="pauseIcon" class="w-5 h-5 hidden" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
                     </button>
-                    <div class="text-sm font-medium flex items-center gap-2">
-                        <span id="drawStatusIndicator" class="w-2.5 h-2.5 rounded-full bg-gray-500"></span>
+                    <input type="range" id="timeline" min="0" max="100" value="0" class="flex-grow">
+                    <div id="timeDisplay" class="text-xs text-gray-400 font-mono w-24 text-right">00:00 / 00:00</div>
+                </div>
+            </div>
+
+            <!-- 戰術繪圖工具列 -->
+            <div class="bg-gray-900 p-3 rounded-b-xl border border-gray-700 border-t-0 flex flex-wrap justify-between items-center gap-3">
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-gray-500 font-medium mr-2 hidden sm:block">繪圖工具</span>
+                    <!-- 自由線條 -->
+                    <button class="tool-btn active border border-gray-600 text-gray-400 p-2 rounded-lg transition-colors hover:bg-gray-800" data-tool="pen" title="自由線條">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                    </button>
+                    <!-- 箭頭 -->
+                    <button class="tool-btn border border-gray-600 text-gray-400 p-2 rounded-lg transition-colors hover:bg-gray-800" data-tool="arrow" title="戰術箭頭">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                    </button>
+                    <!-- 圓圈 -->
+                    <button class="tool-btn border border-gray-600 text-gray-400 p-2 rounded-lg transition-colors hover:bg-gray-800" data-tool="circle" title="圈選球員">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 20a8 8 0 100-16 8 8 0 000 16z"></path></svg>
+                    </button>
+                    
+                    <div class="w-px h-6 bg-gray-700 mx-2"></div>
+                    
+                    <!-- 顏色選擇 -->
+                    <button class="color-btn active w-6 h-6 rounded-full bg-red-500 transition-transform" data-color="#ef4444"></button>
+                    <button class="color-btn w-6 h-6 rounded-full bg-blue-500 transition-transform" data-color="#3b82f6"></button>
+                    <button class="color-btn w-6 h-6 rounded-full bg-yellow-400 transition-transform" data-color="#facc15"></button>
+                    <button class="color-btn w-6 h-6 rounded-full bg-white transition-transform" data-color="#ffffff"></button>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <div class="text-xs font-medium flex items-center gap-1.5 mr-2">
+                        <span id="drawStatusIndicator" class="w-2 h-2 rounded-full bg-gray-500"></span>
                         <span id="drawStatusText" class="text-gray-400">等待載入</span>
                     </div>
+                    <button id="clearBtn" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded border border-gray-700 font-medium transition-colors text-xs flex items-center gap-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        清除
+                    </button>
                 </div>
-                <button id="clearBtn" class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded-lg font-medium transition-colors text-sm">
-                    🗑️ 清除畫布
-                </button>
             </div>
         </div>
 
         <!-- 右側：標籤與紀錄區 -->
         <div class="flex flex-col gap-4">
-            
-            <!-- 標籤按鈕區 (唯一且不重複) -->
-            <div class="bg-gray-800 p-5 rounded-xl border border-gray-700">
-                <h2 class="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">快速標記 (Tagging)</h2>
+            <div class="bg-gray-800 p-5 rounded-xl border border-gray-700 shadow-sm">
+                <h2 class="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">戰術與事件標記</h2>
                 <div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3 gap-3">
-                    <button class="tag-btn bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 py-3 rounded-lg font-bold text-sm transition-all active:scale-95" data-type="防守失誤">
-                        ❌ 防守失誤
+                    <button class="tag-btn bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 py-3 rounded-lg font-bold text-sm transition-all active:scale-95" data-type="失誤">
+                        ❌ 失誤
                     </button>
-                    <button class="tag-btn bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 py-3 rounded-lg font-bold text-sm transition-all active:scale-95" data-type="漂亮傳導">
-                        ✅ 漂亮傳導
+                    <button class="tag-btn bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 py-3 rounded-lg font-bold text-sm transition-all active:scale-95" data-type="好球">
+                        ✅ 好球
                     </button>
-                    <button class="tag-btn bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 py-3 rounded-lg font-bold text-sm transition-all active:scale-95" data-type="射門">
-                        🎯 射門
+                    <button class="tag-btn bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 py-3 rounded-lg font-bold text-sm transition-all active:scale-95" data-type="進球">
+                        ⚽ 進球
                     </button>
                 </div>
+                <p class="text-xs text-gray-500 mt-3 text-center">💡 點擊紀錄將跳至事件發生 <span class="text-blue-400 font-medium">前 3 秒</span></p>
             </div>
 
-            <!-- 紀錄清單區 -->
-            <div class="bg-gray-800 rounded-xl border border-gray-700 flex-grow flex flex-col h-72 lg:h-auto overflow-hidden">
+            <div class="bg-gray-800 rounded-xl border border-gray-700 flex-grow flex flex-col h-72 lg:h-auto overflow-hidden shadow-sm">
                 <div class="p-4 border-b border-gray-700 bg-gray-800/50 flex justify-between items-center">
-                    <h2 class="font-semibold text-gray-200 text-sm">標記時間軸</h2>
+                    <h2 class="font-semibold text-gray-200 text-sm">時間軸紀錄</h2>
                     <span id="tagCount" class="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">0 筆</span>
                 </div>
                 <ul id="tagList" class="flex-grow overflow-y-auto p-3 space-y-2">
@@ -163,13 +216,12 @@
                         尚無標記紀錄<br><span class="text-xs mt-1 block">點擊上方按鈕記錄關鍵時刻</span>
                     </li>
                 </ul>
+            </div>
         </div>
-
-    </div>
-</main>
+    </main>
 
 <script>
-    // --- 動態載入 YouTube API ---
+    // --- YouTube API 動態載入 ---
     let ytApiReady = false;
     function loadYTScript() {
         const tag = document.createElement('script');
@@ -177,28 +229,35 @@
         const firstScriptTag = document.getElementsByTagName('script')[0];
         firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
     }
-    window.onYouTubeIframeAPIReady = function() {
-        ytApiReady = true;
-    };
+    window.onYouTubeIframeAPIReady = function() { ytApiReady = true; };
     loadYTScript();
 
-    // --- UI 元素 ---
+    // --- DOM 元素 ---
+    const localVideo = document.getElementById('localVideo');
+    const ytPlayerContainer = document.getElementById('ytPlayerContainer');
     const videoUpload = document.getElementById('videoUpload');
     const ytUrlInput = document.getElementById('ytUrlInput');
     const loadYtBtn = document.getElementById('loadYtBtn');
     const errorMsg = document.getElementById('errorMsg');
     const placeholderUI = document.getElementById('placeholderUI');
     
-    const localVideo = document.getElementById('localVideo');
-    const ytPlayerContainer = document.getElementById('ytPlayerContainer');
+    // 控制與時間軸
+    const playPauseBtn = document.getElementById('playPauseBtn');
+    const playIcon = document.getElementById('playIcon');
+    const pauseIcon = document.getElementById('pauseIcon');
+    const timeline = document.getElementById('timeline');
+    const timeDisplay = document.getElementById('timeDisplay');
+    
+    // 繪圖
     const canvas = document.getElementById('drawingCanvas');
     const ctx = canvas.getContext('2d');
-    
-    const playPauseBtn = document.getElementById('playPauseBtn');
     const clearBtn = document.getElementById('clearBtn');
+    const toolBtns = document.querySelectorAll('.tool-btn');
+    const colorBtns = document.querySelectorAll('.color-btn');
     const drawStatusIndicator = document.getElementById('drawStatusIndicator');
     const drawStatusText = document.getElementById('drawStatusText');
     
+    // 標籤
     const tagButtons = document.querySelectorAll('.tag-btn');
     const tagList = document.getElementById('tagList');
     const emptyListMsg = document.getElementById('emptyListMsg');
@@ -208,34 +267,44 @@
     let currentMode = null; // 'local' 或 'youtube'
     let isVideoPaused = true;
     let ytPlayer = null;
-    let isDrawing = false;
     let tags = [];
+    let syncInterval = null;
 
-    // --- 顯示錯誤訊息 ---
+    // 繪圖狀態
+    let isDrawing = false;
+    let currentTool = 'pen';
+    let currentColor = '#ef4444';
+    let startPos = {x: 0, y: 0};
+    let canvasSnapshot; // 用於儲存畫布狀態，以實現預覽效果（畫圓、箭頭）
+
+    // --- 工具列 UI 切換 ---
+    toolBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            toolBtns.forEach(b => b.classList.remove('active'));
+            const target = e.currentTarget;
+            target.classList.add('active');
+            currentTool = target.getAttribute('data-tool');
+        });
+    });
+
+    colorBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            colorBtns.forEach(b => b.classList.remove('active'));
+            const target = e.currentTarget;
+            target.classList.add('active');
+            currentColor = target.getAttribute('data-color');
+            ctx.strokeStyle = currentColor;
+            ctx.fillStyle = currentColor;
+        });
+    });
+
+    // --- 影片載入與切換 ---
     function showError(msg) {
         errorMsg.textContent = msg;
         errorMsg.classList.remove('hidden');
         setTimeout(() => errorMsg.classList.add('hidden'), 5000);
     }
 
-    // --- 介面狀態更新 (播放/暫停) ---
-    function updateUIState(paused) {
-        isVideoPaused = paused;
-        if (paused) {
-            canvas.style.pointerEvents = 'auto'; // 暫停時可以繪圖，攔截點擊
-            drawStatusIndicator.className = 'w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]';
-            drawStatusText.textContent = '暫停中 (可繪製戰術)';
-            drawStatusText.classList.replace('text-gray-400', 'text-red-400');
-        } else {
-            canvas.style.pointerEvents = 'none'; // 播放時禁止繪圖，點擊穿透
-            drawStatusIndicator.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500';
-            drawStatusText.textContent = '播放中 (無法繪圖)';
-            drawStatusText.classList.replace('text-red-400', 'text-emerald-400');
-            clearCanvas(); // 播放時清除畫布
-        }
-    }
-
-    // --- 初始化統一播放狀態 ---
     function resetPlayerState(mode) {
         currentMode = mode;
         placeholderUI.style.display = 'none';
@@ -243,28 +312,18 @@
         renderTags();
         clearCanvas();
         updateUIState(true);
-    }
-
-    // --- YouTube API 整合 ---
-    function extractYTId(url) {
-        // 強化版 Regex，支援 shorts, youtu.be, watch?v= 等各種格式
-        const regex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
-        const match = url.match(regex);
-        return match ? match[1] : null;
+        if (syncInterval) clearInterval(syncInterval);
+        startTimelineSync();
     }
 
     loadYtBtn.addEventListener('click', () => {
         const url = ytUrlInput.value.trim();
-        const videoId = extractYTId(url);
+        const regex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+        const match = url.match(regex);
+        const videoId = match ? match[1] : null;
         
-        if (!videoId) {
-            showError("無法解析 YouTube 連結，請檢查網址是否正確。");
-            return;
-        }
-        if (!ytApiReady) {
-            showError("YouTube 核心元件載入中，請稍等一秒再試。");
-            return;
-        }
+        if (!videoId) return showError("無法解析 YouTube 連結。");
+        if (!ytApiReady) return showError("YouTube 載入中，請稍後再試。");
 
         localVideo.classList.add('hidden-player');
         localVideo.pause();
@@ -277,24 +336,12 @@
         } else {
             ytPlayer = new YT.Player('ytPlayerContainer', {
                 videoId: videoId,
-                playerVars: { 
-                    'playsinline': 1, 
-                    'controls': 0, // 隱藏 YT 原生控制列，防止干擾繪畫與 iOS 全螢幕
-                    'disablekb': 1, 
-                    'fs': 0, 
-                    'rel': 0,
-                    'modestbranding': 1
-                },
+                playerVars: { 'playsinline': 1, 'controls': 0, 'disablekb': 1, 'rel': 0 },
                 events: {
-                    'onReady': (event) => {
-                        resizeCanvas();
-                    },
+                    'onReady': resizeCanvas,
                     'onStateChange': (event) => {
-                        if (event.data === YT.PlayerState.PLAYING) {
-                            updateUIState(false);
-                        } else if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) {
-                            updateUIState(true);
-                        }
+                        if (event.data === YT.PlayerState.PLAYING) updateUIState(false);
+                        else if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) updateUIState(true);
                     }
                 }
             });
@@ -302,56 +349,63 @@
         ytUrlInput.value = '';
     });
 
-    // --- 本機影片處理 ---
     videoUpload.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (file) {
-            if(ytPlayer && typeof ytPlayer.pauseVideo === 'function') {
-                ytPlayer.pauseVideo();
-            }
+            if(ytPlayer && typeof ytPlayer.pauseVideo === 'function') ytPlayer.pauseVideo();
             ytPlayerContainer.classList.add('hidden-player');
             localVideo.classList.remove('hidden-player');
-            
             resetPlayerState('local');
-
-            const fileURL = URL.createObjectURL(file);
-            localVideo.src = fileURL;
-            
-            localVideo.onloadedmetadata = () => {
-                resizeCanvas();
-            };
+            localVideo.src = URL.createObjectURL(file);
+            localVideo.onloadedmetadata = () => { resizeCanvas(); updateTimelineRange(); };
         }
     });
 
     localVideo.addEventListener('play', () => updateUIState(false));
     localVideo.addEventListener('pause', () => updateUIState(true));
+    localVideo.addEventListener('ended', () => updateUIState(true));
 
-    // --- 統一的控制邏輯 (取得時間 / 播放暫停 / 跳轉) ---
-    function getUnifiedTime() {
-        if (currentMode === 'local') return localVideo.currentTime;
-        if (currentMode === 'youtube' && ytPlayer && typeof ytPlayer.getCurrentTime === 'function') {
-            return ytPlayer.getCurrentTime() || 0;
+    // --- 統一控制系統 (播放/暫停/時間) ---
+    function updateUIState(paused) {
+        isVideoPaused = paused;
+        if (paused) {
+            canvas.style.pointerEvents = 'auto'; // 啟用繪畫
+            drawStatusIndicator.className = 'w-2 h-2 rounded-full bg-red-500 animate-pulse';
+            drawStatusText.textContent = '暫停中 (可繪圖)';
+            drawStatusText.classList.replace('text-gray-400', 'text-red-400');
+            playIcon.classList.remove('hidden');
+            pauseIcon.classList.add('hidden');
+        } else {
+            canvas.style.pointerEvents = 'none'; // 禁用繪畫，允許穿透
+            drawStatusIndicator.className = 'w-2 h-2 rounded-full bg-emerald-500';
+            drawStatusText.textContent = '播放中';
+            drawStatusText.classList.replace('text-red-400', 'text-emerald-400');
+            playIcon.classList.add('hidden');
+            pauseIcon.classList.remove('hidden');
+            clearCanvas(); // 播放自動清除畫布
         }
-        return 0;
     }
 
     playPauseBtn.addEventListener('click', () => {
-        if (!currentMode) {
-            showError("請先載入影片！");
-            return;
-        }
-
+        if (!currentMode) return showError("請先載入影片！");
         if (currentMode === 'local') {
             localVideo.paused ? localVideo.play() : localVideo.pause();
-        } else if (currentMode === 'youtube' && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
-            const state = ytPlayer.getPlayerState();
-            if (state === YT.PlayerState.PLAYING) {
-                ytPlayer.pauseVideo();
-            } else {
-                ytPlayer.playVideo();
-            }
+        } else if (currentMode === 'youtube' && ytPlayer) {
+            ytPlayer.getPlayerState() === YT.PlayerState.PLAYING ? ytPlayer.pauseVideo() : ytPlayer.playVideo();
         }
     });
+
+    function getUnifiedTime() {
+        if (currentMode === 'local') return localVideo.currentTime;
+        if (currentMode === 'youtube' && ytPlayer && ytPlayer.getCurrentTime) return ytPlayer.getCurrentTime() || 0;
+        return 0;
+    }
+
+    function getUnifiedDuration() {
+        if (currentMode === 'local') return localVideo.duration || 0;
+        if (currentMode === 'youtube' && ytPlayer && ytPlayer.getDuration) return ytPlayer.getDuration() || 0;
+        return 0;
+    }
 
     function seekUnified(time) {
         if (currentMode === 'local') {
@@ -363,7 +417,44 @@
         }
     }
 
-    // --- 畫布與繪圖邏輯 ---
+    // --- 時間軸同步與拖曳 ---
+    function formatTime(seconds) {
+        if(isNaN(seconds) || seconds < 0) return "00:00";
+        const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+        const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+        return `${m}:${s}`;
+    }
+
+    function updateTimelineRange() {
+        const d = getUnifiedDuration();
+        if(d > 0) timeline.max = d;
+    }
+
+    function startTimelineSync() {
+        syncInterval = setInterval(() => {
+            const d = getUnifiedDuration();
+            if(d > 0 && timeline.max == 100) timeline.max = d; // 確保 YouTube 載入後更新最大值
+            
+            if (!isVideoPaused) {
+                const t = getUnifiedTime();
+                timeline.value = t;
+                timeDisplay.innerText = formatTime(t) + ' / ' + formatTime(d);
+            } else {
+                // 暫停時只更新時間文字，防止拖曳時衝突
+                const t = getUnifiedTime();
+                timeDisplay.innerText = formatTime(timeline.value) + ' / ' + formatTime(d);
+            }
+        }, 100);
+    }
+
+    timeline.addEventListener('input', (e) => {
+        if (!currentMode) return;
+        const targetTime = parseFloat(e.target.value);
+        timeDisplay.innerText = formatTime(targetTime) + ' / ' + formatTime(getUnifiedDuration());
+        seekUnified(targetTime);
+    });
+
+    // --- 進階戰術畫布 (支援圖形與顏色) ---
     function resizeCanvas() {
         const wrapper = document.getElementById('videoWrapper');
         canvas.width = wrapper.clientWidth;
@@ -371,7 +462,8 @@
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.lineWidth = 4;
-        ctx.strokeStyle = '#ef4444'; // Tailwind rose-500
+        ctx.strokeStyle = currentColor;
+        ctx.fillStyle = currentColor;
     }
     
     window.addEventListener('resize', resizeCanvas);
@@ -393,23 +485,63 @@
         if (!isVideoPaused || !currentMode) return;
         e.preventDefault();
         isDrawing = true;
-        const pos = getCoordinates(e);
+        startPos = getCoordinates(e);
+        
+        // 儲存當前畫布狀態，供畫圓或箭頭時預覽恢復用
+        canvasSnapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        
         ctx.beginPath();
-        ctx.moveTo(pos.x, pos.y);
+        ctx.moveTo(startPos.x, startPos.y);
     }
 
     function draw(e) {
         if (!isDrawing || !isVideoPaused) return;
         e.preventDefault();
         const pos = getCoordinates(e);
-        ctx.lineTo(pos.x, pos.y);
-        ctx.stroke();
+
+        if (currentTool === 'pen') {
+            ctx.lineTo(pos.x, pos.y);
+            ctx.stroke();
+        } 
+        else if (currentTool === 'arrow') {
+            // 恢復到起點狀態再重畫新箭頭
+            ctx.putImageData(canvasSnapshot, 0, 0);
+            drawArrow(ctx, startPos.x, startPos.y, pos.x, pos.y);
+        }
+        else if (currentTool === 'circle') {
+            // 恢復到起點狀態再重畫新圓圈
+            ctx.putImageData(canvasSnapshot, 0, 0);
+            const radius = Math.sqrt(Math.pow(pos.x - startPos.x, 2) + Math.pow(pos.y - startPos.y, 2));
+            ctx.beginPath();
+            ctx.arc(startPos.x, startPos.y, radius, 0, 2 * Math.PI);
+            ctx.stroke();
+        }
     }
 
     function stopDrawing(e) {
         if (isDrawing) e.preventDefault();
         isDrawing = false;
         ctx.closePath();
+    }
+
+    function drawArrow(ctx, fromx, fromy, tox, toy) {
+        const headlen = 16; // 箭頭長度
+        const dx = tox - fromx;
+        const dy = toy - fromy;
+        const angle = Math.atan2(dy, dx);
+        
+        ctx.beginPath();
+        ctx.moveTo(fromx, fromy);
+        ctx.lineTo(tox, toy);
+        ctx.stroke();
+        
+        // 畫箭頭頂端
+        ctx.beginPath();
+        ctx.moveTo(tox, toy);
+        ctx.lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
+        ctx.lineTo(tox, toy);
+        ctx.fill();
     }
 
     canvas.addEventListener('mousedown', startDrawing);
@@ -425,19 +557,10 @@
     }
     clearBtn.addEventListener('click', clearCanvas);
 
-    // --- 標籤系統邏輯 ---
-    function formatTime(seconds) {
-        const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-        const s = Math.floor(seconds % 60).toString().padStart(2, '0');
-        return `${m}:${s}`;
-    }
-
+    // --- 標籤系統邏輯 (回退 3 秒) ---
     tagButtons.forEach(btn => {
         btn.addEventListener('click', (e) => {
-            if (!currentMode) {
-                showError("請先載入影片再進行標記。");
-                return;
-            }
+            if (!currentMode) return showError("請先載入影片再進行標記。");
             
             const type = e.target.getAttribute('data-type');
             const time = getUnifiedTime();
@@ -446,13 +569,10 @@
             tags.sort((a, b) => a.time - b.time);
             renderTags();
             
-            // 視覺回饋
             const btnEl = e.target;
             const origClass = btnEl.className;
             btnEl.classList.add('bg-white', 'text-gray-900', 'scale-105');
-            setTimeout(() => {
-                btnEl.className = origClass;
-            }, 200);
+            setTimeout(() => btnEl.className = origClass, 200);
         });
     });
 
@@ -470,11 +590,10 @@
 
         tags.forEach(tag => {
             const li = document.createElement('li');
-            
             let colorClasses = '';
-            if(tag.type === '防守失誤') colorClasses = 'bg-rose-500/20 text-rose-400 border-rose-500/30';
-            if(tag.type === '漂亮傳導') colorClasses = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
-            if(tag.type === '射門') colorClasses = 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+            if(tag.type === '失誤') colorClasses = 'bg-rose-500/20 text-rose-400 border-rose-500/30';
+            if(tag.type === '好球') colorClasses = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+            if(tag.type === '進球') colorClasses = 'bg-amber-500/20 text-amber-400 border-amber-500/30';
 
             li.className = `flex justify-between items-center p-3 rounded-lg cursor-pointer transition-colors border bg-gray-800 hover:bg-gray-700 ${colorClasses.split(' ')[2]}`;
             
@@ -488,8 +607,11 @@
                 </button>
             `;
             
+            // 點擊事件：跳至發生前 3 秒
             li.addEventListener('click', () => {
-                seekUnified(tag.time);
+                const targetTime = Math.max(0, tag.time - 3); // 確保不會變負數
+                seekUnified(targetTime);
+                timeline.value = targetTime;
             });
 
             tagList.appendChild(li);
