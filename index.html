@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>足球戰術影像分析工具</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* Tailwind gray-900 */
+            color: #f3f4f6; /* Tailwind gray-100 */
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+        }
+        
+        /* 影片與畫布容器：固定 16:9 比例，確保重疊精準 */
+        .video-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background-color: #000;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+
+        #localVideo, #ytPlayerContainer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        #ytPlayerContainer {
+            pointer-events: none; /* YouTube Iframe 阻擋點擊，統一由自訂按鈕控制 */
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 20;
+            touch-action: none; /* 防止觸控繪圖時觸發網頁捲動 */
+            pointer-events: auto; /* 預設允許繪圖，播放時透過 JS 改為 none */
+        }
+
+        /* 隱藏捲軸但保留功能 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+
+        .hidden-player {
+            display: none !important;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col p-4 md:p-6 antialiased">
+
+    <!-- 頂部：標題與輸入區 -->
+    <header class="max-w-7xl mx-auto w-full mb-6 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+        <div>
+            <h1 class="text-2xl font-bold text-white flex items-center gap-2">
+                ⚽ 戰術分析板 <span class="text-xs bg-blue-600 text-white px-2 py-1 rounded-md font-medium">PRO</span>
+            </h1>
+            <p class="text-sm text-gray-400 mt-1">匯入素材、暫停繪製戰術線、記錄關鍵時刻</p>
+        </div>
+        
+        <div class="flex flex-col sm:flex-row w-full lg:w-auto items-stretch sm:items-center gap-3">
+            <!-- 本機影片上傳 -->
+            <label class="cursor-pointer bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 whitespace-nowrap">
+                📁 載入 MP4
+                <input type="file" id="videoUpload" accept="video/mp4,video/x-m4v,video/*" class="hidden">
+            </label>
+            
+            <div class="text-gray-500 font-medium text-sm text-center hidden sm:block">或</div>
+            
+            <!-- YouTube 匯入 -->
+            <div class="flex flex-grow sm:flex-grow-0">
+                <input type="text" id="ytUrlInput" placeholder="貼上 YouTube 連結..." class="bg-gray-800 border border-gray-700 text-white text-sm rounded-l-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 outline-none placeholder-gray-500">
+                <button id="loadYtBtn" class="bg-red-600 hover:bg-red-700 text-white rounded-r-lg px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap">
+                    匯入 YT
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 錯誤提示區塊 -->
+    <div id="errorMsg" class="max-w-7xl mx-auto w-full mb-4 text-red-400 text-sm font-medium hidden"></div>
+
+    <!-- 主要內容區 -->
+    <main class="max-w-7xl mx-auto w-full flex-grow grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- 左側：影片播放與繪圖區 -->
+        <div class="lg:col-span-2 flex flex-col gap-4">
+            
+            <div class="video-container" id="videoWrapper">
+                <!-- 提示疊加層 -->
+                <div id="placeholderUI" class="absolute inset-0 flex flex-col items-center justify-center text-gray-500 z-0">
+                    <svg class="w-12 h-12 mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path></svg>
+                    <p>請載入本機影片或 YouTube 連結</p>
+                </div>
+
+                <!-- 本機影片播放器 (iOS 重大修正: playsinline webkit-playsinline disablePictureInPicture，且無 controls) -->
+                <video id="localVideo" playsinline webkit-playsinline disablePictureInPicture class="hidden-player"></video>
+                
+                <!-- YouTube 播放器容器 -->
+                <div id="ytPlayerContainer" class="hidden-player"></div>
+
+                <!-- 戰術繪圖畫布 -->
+                <canvas id="drawingCanvas"></canvas>
+            </div>
+
+            <!-- 播放器控制列 -->
+            <div class="flex justify-between items-center bg-gray-800 p-4 rounded-xl border border-gray-700">
+                <div class="flex items-center gap-4">
+                    <button id="playPauseBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-medium transition-colors text-sm flex items-center gap-2 shadow-lg shadow-blue-900/20">
+                        ▶️ 播放 / 暫停
+                    </button>
+                    <div class="text-sm font-medium flex items-center gap-2">
+                        <span id="drawStatusIndicator" class="w-2.5 h-2.5 rounded-full bg-gray-500"></span>
+                        <span id="drawStatusText" class="text-gray-400">等待載入</span>
+                    </div>
+                </div>
+                <button id="clearBtn" class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded-lg font-medium transition-colors text-sm">
+                    🗑️ 清除畫布
+                </button>
+            </div>
+        </div>
+
+        <!-- 右側：標籤與紀錄區 -->
+        <div class="flex flex-col gap-4">
+            
+            <!-- 標籤按鈕區 (唯一且不重複) -->
+            <div class="bg-gray-800 p-5 rounded-xl border border-gray-700">
+                <h2 class="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">快速標記 (Tagging)</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3 gap-3">
+                    <button class="tag-btn bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 py-3 rounded-lg font-bold text-sm transition-all active:scale-95" data-type="防守失誤">
+                        ❌ 防守失誤
+                    </button>
+                    <button class="tag-btn bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 py-3 rounded-lg font-bold text-sm transition-all active:scale-95" data-type="漂亮傳導">
+                        ✅ 漂亮傳導
+                    </button>
+                    <button class="tag-btn bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 py-3 rounded-lg font-bold text-sm transition-all active:scale-95" data-type="射門">
+                        🎯 射門
+                    </button>
+                </div>
+            </div>
+
+            <!-- 紀錄清單區 -->
+            <div class="bg-gray-800 rounded-xl border border-gray-700 flex-grow flex flex-col h-72 lg:h-auto overflow-hidden">
+                <div class="p-4 border-b border-gray-700 bg-gray-800/50 flex justify-between items-center">
+                    <h2 class="font-semibold text-gray-200 text-sm">標記時間軸</h2>
+                    <span id="tagCount" class="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded-md">0 筆</span>
+                </div>
+                <ul id="tagList" class="flex-grow overflow-y-auto p-3 space-y-2">
+                    <li id="emptyListMsg" class="text-center text-gray-500 text-sm mt-8">
+                        尚無標記紀錄<br><span class="text-xs mt-1 block">點擊上方按鈕記錄關鍵時刻</span>
+                    </li>
+                </ul>
+        </div>
+
+    </div>
+</main>
+
+<script>
+    // --- 動態載入 YouTube API ---
+    let ytApiReady = false;
+    function loadYTScript() {
+        const tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+    }
+    window.onYouTubeIframeAPIReady = function() {
+        ytApiReady = true;
+    };
+    loadYTScript();
+
+    // --- UI 元素 ---
+    const videoUpload = document.getElementById('videoUpload');
+    const ytUrlInput = document.getElementById('ytUrlInput');
+    const loadYtBtn = document.getElementById('loadYtBtn');
+    const errorMsg = document.getElementById('errorMsg');
+    const placeholderUI = document.getElementById('placeholderUI');
+    
+    const localVideo = document.getElementById('localVideo');
+    const ytPlayerContainer = document.getElementById('ytPlayerContainer');
+    const canvas = document.getElementById('drawingCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    const playPauseBtn = document.getElementById('playPauseBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const drawStatusIndicator = document.getElementById('drawStatusIndicator');
+    const drawStatusText = document.getElementById('drawStatusText');
+    
+    const tagButtons = document.querySelectorAll('.tag-btn');
+    const tagList = document.getElementById('tagList');
+    const emptyListMsg = document.getElementById('emptyListMsg');
+    const tagCount = document.getElementById('tagCount');
+
+    // --- 狀態管理 ---
+    let currentMode = null; // 'local' 或 'youtube'
+    let isVideoPaused = true;
+    let ytPlayer = null;
+    let isDrawing = false;
+    let tags = [];
+
+    // --- 顯示錯誤訊息 ---
+    function showError(msg) {
+        errorMsg.textContent = msg;
+        errorMsg.classList.remove('hidden');
+        setTimeout(() => errorMsg.classList.add('hidden'), 5000);
+    }
+
+    // --- 介面狀態更新 (播放/暫停) ---
+    function updateUIState(paused) {
+        isVideoPaused = paused;
+        if (paused) {
+            canvas.style.pointerEvents = 'auto'; // 暫停時可以繪圖，攔截點擊
+            drawStatusIndicator.className = 'w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]';
+            drawStatusText.textContent = '暫停中 (可繪製戰術)';
+            drawStatusText.classList.replace('text-gray-400', 'text-red-400');
+        } else {
+            canvas.style.pointerEvents = 'none'; // 播放時禁止繪圖，點擊穿透
+            drawStatusIndicator.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500';
+            drawStatusText.textContent = '播放中 (無法繪圖)';
+            drawStatusText.classList.replace('text-red-400', 'text-emerald-400');
+            clearCanvas(); // 播放時清除畫布
+        }
+    }
+
+    // --- 初始化統一播放狀態 ---
+    function resetPlayerState(mode) {
+        currentMode = mode;
+        placeholderUI.style.display = 'none';
+        tags = [];
+        renderTags();
+        clearCanvas();
+        updateUIState(true);
+    }
+
+    // --- YouTube API 整合 ---
+    function extractYTId(url) {
+        // 強化版 Regex，支援 shorts, youtu.be, watch?v= 等各種格式
+        const regex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+        const match = url.match(regex);
+        return match ? match[1] : null;
+    }
+
+    loadYtBtn.addEventListener('click', () => {
+        const url = ytUrlInput.value.trim();
+        const videoId = extractYTId(url);
+        
+        if (!videoId) {
+            showError("無法解析 YouTube 連結，請檢查網址是否正確。");
+            return;
+        }
+        if (!ytApiReady) {
+            showError("YouTube 核心元件載入中，請稍等一秒再試。");
+            return;
+        }
+
+        localVideo.classList.add('hidden-player');
+        localVideo.pause();
+        ytPlayerContainer.classList.remove('hidden-player');
+        
+        resetPlayerState('youtube');
+
+        if (ytPlayer) {
+            ytPlayer.loadVideoById(videoId);
+        } else {
+            ytPlayer = new YT.Player('ytPlayerContainer', {
+                videoId: videoId,
+                playerVars: { 
+                    'playsinline': 1, 
+                    'controls': 0, // 隱藏 YT 原生控制列，防止干擾繪畫與 iOS 全螢幕
+                    'disablekb': 1, 
+                    'fs': 0, 
+                    'rel': 0,
+                    'modestbranding': 1
+                },
+                events: {
+                    'onReady': (event) => {
+                        resizeCanvas();
+                    },
+                    'onStateChange': (event) => {
+                        if (event.data === YT.PlayerState.PLAYING) {
+                            updateUIState(false);
+                        } else if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) {
+                            updateUIState(true);
+                        }
+                    }
+                }
+            });
+        }
+        ytUrlInput.value = '';
+    });
+
+    // --- 本機影片處理 ---
+    videoUpload.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            if(ytPlayer && typeof ytPlayer.pauseVideo === 'function') {
+                ytPlayer.pauseVideo();
+            }
+            ytPlayerContainer.classList.add('hidden-player');
+            localVideo.classList.remove('hidden-player');
+            
+            resetPlayerState('local');
+
+            const fileURL = URL.createObjectURL(file);
+            localVideo.src = fileURL;
+            
+            localVideo.onloadedmetadata = () => {
+                resizeCanvas();
+            };
+        }
+    });
+
+    localVideo.addEventListener('play', () => updateUIState(false));
+    localVideo.addEventListener('pause', () => updateUIState(true));
+
+    // --- 統一的控制邏輯 (取得時間 / 播放暫停 / 跳轉) ---
+    function getUnifiedTime() {
+        if (currentMode === 'local') return localVideo.currentTime;
+        if (currentMode === 'youtube' && ytPlayer && typeof ytPlayer.getCurrentTime === 'function') {
+            return ytPlayer.getCurrentTime() || 0;
+        }
+        return 0;
+    }
+
+    playPauseBtn.addEventListener('click', () => {
+        if (!currentMode) {
+            showError("請先載入影片！");
+            return;
+        }
+
+        if (currentMode === 'local') {
+            localVideo.paused ? localVideo.play() : localVideo.pause();
+        } else if (currentMode === 'youtube' && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
+            const state = ytPlayer.getPlayerState();
+            if (state === YT.PlayerState.PLAYING) {
+                ytPlayer.pauseVideo();
+            } else {
+                ytPlayer.playVideo();
+            }
+        }
+    });
+
+    function seekUnified(time) {
+        if (currentMode === 'local') {
+            localVideo.currentTime = time;
+            localVideo.pause();
+        } else if (currentMode === 'youtube' && ytPlayer && typeof ytPlayer.seekTo === 'function') {
+            ytPlayer.seekTo(time, true);
+            ytPlayer.pauseVideo();
+        }
+    }
+
+    // --- 畫布與繪圖邏輯 ---
+    function resizeCanvas() {
+        const wrapper = document.getElementById('videoWrapper');
+        canvas.width = wrapper.clientWidth;
+        canvas.height = wrapper.clientHeight;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#ef4444'; // Tailwind rose-500
+    }
+    
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function getCoordinates(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
+        };
+    }
+
+    function startDrawing(e) {
+        if (!isVideoPaused || !currentMode) return;
+        e.preventDefault();
+        isDrawing = true;
+        const pos = getCoordinates(e);
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+    }
+
+    function draw(e) {
+        if (!isDrawing || !isVideoPaused) return;
+        e.preventDefault();
+        const pos = getCoordinates(e);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+    }
+
+    function stopDrawing(e) {
+        if (isDrawing) e.preventDefault();
+        isDrawing = false;
+        ctx.closePath();
+    }
+
+    canvas.addEventListener('mousedown', startDrawing);
+    canvas.addEventListener('mousemove', draw);
+    canvas.addEventListener('mouseup', stopDrawing);
+    canvas.addEventListener('mouseout', stopDrawing);
+    canvas.addEventListener('touchstart', startDrawing, { passive: false });
+    canvas.addEventListener('touchmove', draw, { passive: false });
+    canvas.addEventListener('touchend', stopDrawing, { passive: false });
+
+    function clearCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    clearBtn.addEventListener('click', clearCanvas);
+
+    // --- 標籤系統邏輯 ---
+    function formatTime(seconds) {
+        const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+        const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+        return `${m}:${s}`;
+    }
+
+    tagButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            if (!currentMode) {
+                showError("請先載入影片再進行標記。");
+                return;
+            }
+            
+            const type = e.target.getAttribute('data-type');
+            const time = getUnifiedTime();
+            
+            tags.push({ type, time, id: Date.now() });
+            tags.sort((a, b) => a.time - b.time);
+            renderTags();
+            
+            // 視覺回饋
+            const btnEl = e.target;
+            const origClass = btnEl.className;
+            btnEl.classList.add('bg-white', 'text-gray-900', 'scale-105');
+            setTimeout(() => {
+                btnEl.className = origClass;
+            }, 200);
+        });
+    });
+
+    function renderTags() {
+        tagList.innerHTML = '';
+        tagCount.textContent = `${tags.length} 筆`;
+        
+        if (tags.length === 0) {
+            tagList.appendChild(emptyListMsg);
+            emptyListMsg.style.display = 'block';
+            return;
+        }
+        
+        emptyListMsg.style.display = 'none';
+
+        tags.forEach(tag => {
+            const li = document.createElement('li');
+            
+            let colorClasses = '';
+            if(tag.type === '防守失誤') colorClasses = 'bg-rose-500/20 text-rose-400 border-rose-500/30';
+            if(tag.type === '漂亮傳導') colorClasses = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+            if(tag.type === '射門') colorClasses = 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+
+            li.className = `flex justify-between items-center p-3 rounded-lg cursor-pointer transition-colors border bg-gray-800 hover:bg-gray-700 ${colorClasses.split(' ')[2]}`;
+            
+            li.innerHTML = `
+                <div class="flex items-center gap-3 pointer-events-none">
+                    <span class="text-xs font-bold px-2 py-1 rounded ${colorClasses.split(' ').slice(0,2).join(' ')}">${tag.type}</span>
+                    <span class="text-gray-300 text-sm font-medium">時間: ${formatTime(tag.time)}</span>
+                </div>
+                <button class="text-gray-500 hover:text-red-400 transition-colors p-1" onclick="deleteTag(${tag.id}, event)">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            `;
+            
+            li.addEventListener('click', () => {
+                seekUnified(tag.time);
+            });
+
+            tagList.appendChild(li);
+        });
+    }
+
+    window.deleteTag = function(id, event) {
+        event.stopPropagation();
+        tags = tags.filter(tag => tag.id !== id);
+        renderTags();
+    };
+
+</script>
+</body>
+</html>
