@@ -335,8 +335,14 @@
     document.getElementById('loadYtBtn').addEventListener('click', () => {
         const url = document.getElementById('ytUrlInput').value.trim();
         const match = url.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-        if (!match) return showError("無法解析 YouTube 連結。");
-        if (!ytApiReady) return showError("YouTube API 載入中，請稍後。");
+        if (!match) {
+            alert("無法解析 YouTube 連結，請確認網址格式 (支援 watch?v=, youtu.be, shorts 等)。");
+            return showError("無法解析 YouTube 連結。");
+        }
+        if (!ytApiReady) {
+            alert("YouTube 系統尚未準備好，請稍後再試。");
+            return showError("YouTube API 載入中，請稍後。");
+        }
 
         localVideo.classList.add('hidden-player');
         localVideo.pause();
@@ -362,13 +368,34 @@
 
     document.getElementById('videoUpload').addEventListener('change', (e) => {
         const file = e.target.files[0];
-        if (file) {
+        if (!file) return;
+        
+        try {
             if(ytPlayer && typeof ytPlayer.pauseVideo === 'function') ytPlayer.pauseVideo();
+            
+            // Toggle visibility completely
             ytPlayerContainer.classList.add('hidden-player');
             localVideo.classList.remove('hidden-player');
+            
             resetPlayerState('local');
-            localVideo.src = URL.createObjectURL(file);
-            localVideo.onloadedmetadata = () => { resizeCanvas(); };
+            
+            // CRITICAL FIX: use createObjectURL and explicitly call .load()
+            const fileURL = URL.createObjectURL(file);
+            localVideo.src = fileURL;
+            localVideo.load(); // Required for iOS/Safari to correctly load new source
+            
+            localVideo.onloadedmetadata = () => { 
+                resizeCanvas(); 
+            };
+            
+            // Handle loading errors natively
+            localVideo.onerror = (err) => {
+                alert("影片載入失敗，請確認該檔案為瀏覽器支援的格式 (如 MP4, WebM)。");
+                showError("本機影片載入失敗。");
+                console.error("Video Load Error", err);
+            };
+        } catch (error) {
+            alert("匯入發生錯誤: " + error.message);
         }
     });
 
